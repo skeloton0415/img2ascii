@@ -24,6 +24,8 @@ class ImageToASCII:
         self.height_scale = tk.DoubleVar(value=100.0)
         self.char_set = tk.StringVar(value="standard")
         self.invert_colors = tk.BooleanVar(value=False)
+        self.brightness = tk.DoubleVar(value=0.0)  # -100 to +100
+        self.font_size = tk.IntVar(value=6)  # Font size for preview display
         self.preview_enabled = False  # Control when preview updates
         
         # ASCII character sets
@@ -175,7 +177,7 @@ class ImageToASCII:
         self.width_scale.set(width_value)
         self.height_scale.set(height_value)
             
-    def image_to_ascii(self, image_path, width_scale=None, height_scale=None, char_set=None, invert=None):
+    def image_to_ascii(self, image_path, width_scale=None, height_scale=None, char_set=None, invert=None, brightness=None):
         """Convert image to ASCII art with support for larger images"""
         if not os.path.exists(image_path):
             return "Please select a valid image file."
@@ -186,6 +188,24 @@ class ImageToASCII:
             
             # Convert to grayscale
             image = image.convert('L')
+            
+            # Apply brightness adjustment
+            if brightness is None:
+                brightness = self.brightness.get()
+            
+            if brightness != 0:
+                # Convert to numpy array for brightness adjustment
+                import numpy as np
+                img_array = np.array(image)
+                
+                # Apply brightness adjustment
+                img_array = img_array + brightness
+                
+                # Clamp values to 0-255 range
+                img_array = np.clip(img_array, 0, 255)
+                
+                # Convert back to PIL Image
+                image = Image.fromarray(img_array.astype('uint8'))
             
             # Resize image
             if width_scale is None:
@@ -279,13 +299,13 @@ class ImageToASCII:
         ascii_art = self.image_to_ascii(self.image_path.get())
         
         # Update status
-        status_label.config(text="ASCII Art Preview - Hold Ctrl + Scroll to scale")
+        status_label.config(text="ASCII Art Preview - Hold Ctrl + Scroll to change font size")
         
         # Create text widget for preview
         text_frame = ttk.Frame(main_frame)
         text_frame.pack(fill=tk.BOTH, expand=True)
         
-        preview_text = tk.Text(text_frame, wrap=tk.NONE, font=("Courier", 6), 
+        preview_text = tk.Text(text_frame, wrap=tk.NONE, font=("Courier", self.font_size.get()), 
                               bg='black', fg='white')
         scrollbar_v = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=preview_text.yview)
         scrollbar_h = ttk.Scrollbar(text_frame, orient=tk.HORIZONTAL, command=preview_text.xview)
@@ -312,12 +332,49 @@ class ImageToASCII:
         buttons_frame = ttk.Frame(main_frame)
         buttons_frame.pack(fill=tk.X, pady=(10, 0))
         
-        ttk.Button(buttons_frame, text="Copy to Clipboard", 
+        # Preview controls frame
+        controls_frame = ttk.Frame(buttons_frame)
+        controls_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Character set control
+        ttk.Label(controls_frame, text="Character Set:").pack(side=tk.LEFT, padx=(0, 5))
+        char_combo = ttk.Combobox(controls_frame, textvariable=self.char_set, 
+                                 values=list(self.char_sets.keys()), state="readonly", width=10)
+        char_combo.pack(side=tk.LEFT, padx=(0, 10))
+        char_combo.bind('<<ComboboxSelected>>', lambda event: self.update_preview_from_controls(preview_text, status_label))
+        
+        # Invert colors control
+        invert_check = ttk.Checkbutton(controls_frame, text="Invert Colors", variable=self.invert_colors,
+                                     command=lambda: self.update_preview_from_controls(preview_text, status_label))
+        invert_check.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Brightness control
+        brightness_frame = ttk.Frame(controls_frame)
+        brightness_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(brightness_frame, text="Brightness:").pack(side=tk.LEFT, padx=(0, 5))
+        brightness_slider = ttk.Scale(brightness_frame, from_=-100, to=100, variable=self.brightness, 
+                                     orient=tk.HORIZONTAL, length=100)
+        brightness_slider.pack(side=tk.LEFT, padx=(0, 5))
+        brightness_slider.bind('<Motion>', lambda event: self.update_preview_from_controls(preview_text, status_label))
+        brightness_slider.bind('<ButtonRelease-1>', lambda event: self.update_preview_from_controls(preview_text, status_label))
+        
+        # Brightness input field
+        brightness_entry = ttk.Entry(brightness_frame, textvariable=self.brightness, width=6)
+        brightness_entry.pack(side=tk.LEFT, padx=(0, 5))
+        brightness_entry.bind('<Return>', lambda event: self.on_brightness_entry_change(preview_text, status_label))
+        brightness_entry.bind('<FocusOut>', lambda event: self.on_brightness_entry_change(preview_text, status_label))
+        
+        # Action buttons frame
+        action_buttons_frame = ttk.Frame(buttons_frame)
+        action_buttons_frame.pack(side=tk.RIGHT)
+        
+        ttk.Button(action_buttons_frame, text="Copy to Clipboard", 
                   command=lambda: self.copy_to_clipboard_dynamic()).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(buttons_frame, text="Save ASCII Art", 
+        ttk.Button(action_buttons_frame, text="Save ASCII Art", 
                   command=lambda: self.save_ascii_from_preview_dynamic()).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(buttons_frame, text="Close", 
-                  command=preview_window.destroy).pack(side=tk.RIGHT)
+        ttk.Button(action_buttons_frame, text="Close", 
+                  command=preview_window.destroy).pack(side=tk.LEFT)
         
         self.preview_enabled = True
         
@@ -327,40 +384,15 @@ class ImageToASCII:
         self.current_status_label = status_label
         self.current_ascii_art = ascii_art
         
-    def scale_with_mouse(self, event, preview_text, status_label):
-        """Scale the ASCII art using mouse wheel with Ctrl key - updates on every scroll"""
-        # Only process if we have a preview window open
-        if not hasattr(self, 'current_preview_window') or not self.current_preview_window.winfo_exists():
-            return
-            
-        # Determine scaling direction
-        if event.delta > 0:  # Scroll up - zoom in
-            scale_factor = 1.05  # Smaller increments for smoother scaling
-        else:  # Scroll down - zoom out
-            scale_factor = 0.95
-            
-        # Update scale values
-        current_width = self.width_scale.get()
-        current_height = self.height_scale.get()
+    def update_preview_from_controls(self, preview_text, status_label):
+        """Update preview when character set or invert colors changes"""
+        # Update status
+        status_label.config(text="Updating ASCII art...")
         
-        new_width = current_width * scale_factor
-        new_height = current_height * scale_factor
-        
-        # Clamp to valid range
-        new_width = max(0.001, min(1000, new_width))
-        new_height = max(0.001, min(1000, new_height))
-        
-        # Update scale variables
-        self.width_scale.set(new_width)
-        self.height_scale.set(new_height)
-        
-        # Update status immediately
-        status_label.config(text=f"Scaling... Width: {new_width:.1f}%, Height: {new_height:.1f}%")
-        
-        # Force GUI update to show status change
+        # Force GUI update
         self.root.update_idletasks()
         
-        # Regenerate ASCII art
+        # Regenerate ASCII art with current settings
         try:
             new_ascii_art = self.image_to_ascii(self.image_path.get())
             
@@ -374,10 +406,58 @@ class ImageToASCII:
             self.current_ascii_art = new_ascii_art
             
             # Update status
-            status_label.config(text=f"ASCII Art Preview - Width: {new_width:.1f}%, Height: {new_height:.1f}%")
+            char_set_name = self.char_set.get()
+            invert_status = "Inverted" if self.invert_colors.get() else "Normal"
+            brightness_value = self.brightness.get()
+            status_label.config(text=f"ASCII Art Preview - {char_set_name} ({invert_status}) Brightness: {brightness_value:.0f}")
             
         except Exception as e:
-            status_label.config(text=f"Error scaling: {str(e)}")
+            status_label.config(text=f"Error updating: {str(e)}")
+        
+    def on_brightness_entry_change(self, preview_text, status_label):
+        """Handle brightness entry field changes"""
+        try:
+            value = float(self.brightness.get())
+            if -100 <= value <= 100:
+                # Valid value, update preview
+                self.update_preview_from_controls(preview_text, status_label)
+            else:
+                messagebox.showerror("Invalid Value", "Brightness must be between -100 and 100")
+                self.brightness.set(0.0)  # Reset to default
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid number")
+            self.brightness.set(0.0)  # Reset to default
+        
+    def scale_with_mouse(self, event, preview_text, status_label):
+        """Change font size using mouse wheel with Ctrl key - maintains aspect ratio"""
+        # Only process if we have a preview window open
+        if not hasattr(self, 'current_preview_window') or not self.current_preview_window.winfo_exists():
+            return
+            
+        # Determine font size change direction
+        if event.delta > 0:  # Scroll up - increase font size
+            font_change = 1
+        else:  # Scroll down - decrease font size
+            font_change = -1
+            
+        # Get current font size
+        current_font_size = self.font_size.get()
+        new_font_size = current_font_size + font_change
+        
+        # Clamp to valid range (2 to 20)
+        new_font_size = max(2, min(20, new_font_size))
+        
+        # Update font size variable
+        self.font_size.set(new_font_size)
+        
+        # Update preview text font
+        preview_text.config(font=("Courier", new_font_size))
+        
+        # Update status
+        char_set_name = self.char_set.get()
+        invert_status = "Inverted" if self.invert_colors.get() else "Normal"
+        brightness_value = self.brightness.get()
+        status_label.config(text=f"ASCII Art Preview - {char_set_name} ({invert_status}) Brightness: {brightness_value:.0f} Font: {new_font_size}")
         
     def copy_to_clipboard_dynamic(self):
         """Copy current ASCII art to clipboard"""
