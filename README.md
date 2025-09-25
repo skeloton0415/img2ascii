@@ -7,8 +7,11 @@ A simple and user-friendly GUI application that converts images to ASCII art wit
 - **Simple GUI Interface**: Easy-to-use interface built with tkinter
 - **Multiple Character Sets**: Choose from different ASCII character sets for various styles
 - **Adjustable Scale**: Control the width and height scaling of the output
+- **Aspect Ratio Presets**: Quick buttons for common ratios (1:1, 4:3, 16:9, etc.)
+- **Brightness Control**: Fine-tune image brightness before conversion
 - **Color Inversion**: Option to invert the ASCII art colors
 - **Live Preview**: See your ASCII art in real-time as you adjust settings
+- **Font Size Control**: Adjustable character size in preview (Ctrl + Scroll)
 - **Save to File**: Export your ASCII art to a text file
 - **Multiple Image Formats**: Supports PNG, JPG, JPEG, GIF, BMP, and TIFF
 

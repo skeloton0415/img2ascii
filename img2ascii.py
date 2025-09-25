@@ -4,11 +4,18 @@ Image to ASCII Art Converter
 A simple GUI application that converts images to ASCII art with multiple styling options.
 """
 
+import sys
+import os
+
+# Hide console window on Windows
+if sys.platform == "win32":
+    import ctypes
+    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from PIL import Image, ImageTk
-import os
-import sys
+from PIL import Image, ImageTk, ImageDraw, ImageFont
+import numpy as np
 
 class ImageToASCII:
     def __init__(self, root):
@@ -27,6 +34,12 @@ class ImageToASCII:
         self.brightness = tk.DoubleVar(value=0.0)  # -100 to +100
         self.font_size = tk.IntVar(value=6)  # Font size for preview display
         self.preview_enabled = False  # Control when preview updates
+        
+        # Image export settings
+        self.export_font_size = tk.IntVar(value=12)  # Font size for image export
+        self.export_bg_color = tk.StringVar(value="black")  # Background color
+        self.export_text_color = tk.StringVar(value="white")  # Text color
+        
         
         # ASCII character sets
         self.char_sets = {
@@ -53,80 +66,266 @@ class ImageToASCII:
         
         # Title
         title_label = ttk.Label(main_frame, text="Image to ASCII Art Converter", 
-                               font=("Arial", 16, "bold"))
-        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+                               font=("Arial", 18, "bold"))
+        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 25))
         
         # File selection frame
-        file_frame = ttk.LabelFrame(main_frame, text="Select Image", padding="10")
-        file_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        file_frame = ttk.LabelFrame(main_frame, text="Select Image", padding="15")
+        file_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
         file_frame.columnconfigure(1, weight=1)
         
-        ttk.Label(file_frame, text="Image:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        ttk.Entry(file_frame, textvariable=self.image_path, state="readonly").grid(
-            row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
-        ttk.Button(file_frame, text="Browse", command=self.browse_image).grid(row=0, column=2)
+        ttk.Label(file_frame, text="Image:", font=("Arial", 10)).grid(row=0, column=0, sticky=tk.W, padx=(0, 15))
+        ttk.Entry(file_frame, textvariable=self.image_path, state="readonly", font=("Arial", 9)).grid(
+            row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 15))
+        ttk.Button(file_frame, text="Browse", command=self.browse_image, width=12).grid(row=0, column=2)
         
         # Settings frame
-        settings_frame = ttk.LabelFrame(main_frame, text="Settings", padding="10")
-        settings_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        settings_frame = ttk.LabelFrame(main_frame, text="Settings", padding="15")
+        settings_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
         settings_frame.columnconfigure(1, weight=1)
         
         # Width scale
-        ttk.Label(settings_frame, text="Width Scale:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-        width_scale = ttk.Scale(settings_frame, from_=0.001, to=1000, variable=self.width_scale, 
+        ttk.Label(settings_frame, text="Width Scale:", font=("Arial", 10)).grid(row=0, column=0, sticky=tk.W, padx=(0, 15))
+        width_scale = ttk.Scale(settings_frame, from_=0.001, to=100, variable=self.width_scale, 
                                orient=tk.HORIZONTAL)
-        width_scale.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        width_scale.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 15))
         
         # Width input field
-        width_entry = ttk.Entry(settings_frame, textvariable=self.width_scale, width=8)
-        width_entry.grid(row=0, column=2, padx=(0, 10))
+        width_entry = ttk.Entry(settings_frame, textvariable=self.width_scale, width=10, font=("Arial", 9))
+        width_entry.grid(row=0, column=2, padx=(0, 15))
         width_entry.bind('<Return>', self.on_width_entry_change)
         width_entry.bind('<FocusOut>', self.on_width_entry_change)
         
         # Height scale
-        ttk.Label(settings_frame, text="Height Scale:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10))
-        height_scale = ttk.Scale(settings_frame, from_=0.001, to=1000, variable=self.height_scale, 
+        ttk.Label(settings_frame, text="Height Scale:", font=("Arial", 10)).grid(row=1, column=0, sticky=tk.W, padx=(0, 15))
+        height_scale = ttk.Scale(settings_frame, from_=0.001, to=100, variable=self.height_scale, 
                                 orient=tk.HORIZONTAL)
-        height_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        height_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 15))
         
         # Height input field
-        height_entry = ttk.Entry(settings_frame, textvariable=self.height_scale, width=8)
-        height_entry.grid(row=1, column=2, padx=(0, 10))
+        height_entry = ttk.Entry(settings_frame, textvariable=self.height_scale, width=10, font=("Arial", 9))
+        height_entry.grid(row=1, column=2, padx=(0, 15))
         height_entry.bind('<Return>', self.on_height_entry_change)
         height_entry.bind('<FocusOut>', self.on_height_entry_change)
         
         # Aspect ratio buttons (single set for both scales)
         aspect_buttons_frame = ttk.Frame(settings_frame)
-        aspect_buttons_frame.grid(row=0, column=3, rowspan=2, padx=(10, 0))
-        ttk.Button(aspect_buttons_frame, text="1:1", width=4, 
-                  command=lambda: self.set_aspect_ratio(1, 1)).pack(side=tk.TOP, padx=(0, 2), pady=(0, 2))
-        ttk.Button(aspect_buttons_frame, text="4:3", width=4, 
-                  command=lambda: self.set_aspect_ratio(4, 3)).pack(side=tk.TOP, padx=(0, 2), pady=(0, 2))
-        ttk.Button(aspect_buttons_frame, text="16:9", width=4, 
-                  command=lambda: self.set_aspect_ratio(16, 9)).pack(side=tk.TOP, padx=(0, 2), pady=(0, 2))
-        ttk.Button(aspect_buttons_frame, text="21:9", width=4, 
-                  command=lambda: self.set_aspect_ratio(21, 9)).pack(side=tk.TOP, padx=(0, 2), pady=(0, 2))
-        ttk.Button(aspect_buttons_frame, text="3:2", width=4, 
-                  command=lambda: self.set_aspect_ratio(3, 2)).pack(side=tk.TOP, padx=(0, 2), pady=(0, 2))
-        ttk.Button(aspect_buttons_frame, text="2:3", width=4, 
-                  command=lambda: self.set_aspect_ratio(2, 3)).pack(side=tk.TOP, padx=(0, 2), pady=(0, 2))
+        aspect_buttons_frame.grid(row=0, column=3, rowspan=2, padx=(20, 0))
+        
+        ttk.Label(aspect_buttons_frame, text="Aspect Ratios:", font=("Arial", 9, "bold")).pack(pady=(0, 5))
+        
+        # First row of buttons
+        row1_frame = ttk.Frame(aspect_buttons_frame)
+        row1_frame.pack()
+        ttk.Button(row1_frame, text="1:1", width=5, 
+                  command=lambda: self.set_aspect_ratio(1, 1)).pack(side=tk.LEFT, padx=(0, 3), pady=(0, 3))
+        ttk.Button(row1_frame, text="4:3", width=5, 
+                  command=lambda: self.set_aspect_ratio(4, 3)).pack(side=tk.LEFT, padx=(0, 3), pady=(0, 3))
+        ttk.Button(row1_frame, text="16:9", width=5, 
+                  command=lambda: self.set_aspect_ratio(16, 9)).pack(side=tk.LEFT, padx=(0, 3), pady=(0, 3))
+        
+        # Second row of buttons
+        row2_frame = ttk.Frame(aspect_buttons_frame)
+        row2_frame.pack()
+        ttk.Button(row2_frame, text="21:9", width=5, 
+                  command=lambda: self.set_aspect_ratio(21, 9)).pack(side=tk.LEFT, padx=(0, 3), pady=(0, 3))
+        ttk.Button(row2_frame, text="3:2", width=5, 
+                  command=lambda: self.set_aspect_ratio(3, 2)).pack(side=tk.LEFT, padx=(0, 3), pady=(0, 3))
+        ttk.Button(row2_frame, text="2:3", width=5, 
+                  command=lambda: self.set_aspect_ratio(2, 3)).pack(side=tk.LEFT, padx=(0, 3), pady=(0, 3))
         
         # Character set
-        ttk.Label(settings_frame, text="Character Set:").grid(row=2, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Label(settings_frame, text="Character Set:", font=("Arial", 10)).grid(row=2, column=0, sticky=tk.W, padx=(0, 15))
         char_combo = ttk.Combobox(settings_frame, textvariable=self.char_set, 
-                                 values=list(self.char_sets.keys()), state="readonly")
-        char_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+                                 values=list(self.char_sets.keys()), state="readonly", width=15)
+        char_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 15))
         
         # Invert colors
-        ttk.Checkbutton(settings_frame, text="Invert Colors", variable=self.invert_colors).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        ttk.Checkbutton(settings_frame, text="Invert Colors", variable=self.invert_colors).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(15, 0))
         
         # Buttons frame
         buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.grid(row=3, column=0, columnspan=3, pady=(0, 10))
+        buttons_frame.grid(row=3, column=0, columnspan=3, pady=(20, 0))
         
-        ttk.Button(buttons_frame, text="Convert to ASCII", command=self.convert_image).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(buttons_frame, text="Save ASCII Art", command=self.save_ascii).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(buttons_frame, text="Preview", command=self.open_preview_window).pack(side=tk.LEFT)
+        # Center the buttons
+        buttons_container = ttk.Frame(buttons_frame)
+        buttons_container.pack()
+        
+        ttk.Button(buttons_container, text="Preview ASCII Art", command=self.open_preview_window, width=18).pack(side=tk.LEFT)
+        
+    def ascii_to_image(self, ascii_text, font_size=None, bg_color=None, text_color=None):
+        """Convert ASCII art to an image"""
+        if font_size is None:
+            font_size = self.export_font_size.get()
+        if bg_color is None:
+            bg_color = self.export_bg_color.get()
+        if text_color is None:
+            text_color = self.export_text_color.get()
+            
+        # Split ASCII text into lines
+        lines = ascii_text.split('\n')
+        if not lines:
+            return None
+            
+        # Calculate image dimensions
+        max_line_length = max(len(line) for line in lines) if lines else 0
+        line_height = font_size + 2  # Add some padding
+        
+        # Create image
+        img_width = max_line_length * (font_size // 2)  # Approximate character width
+        img_height = len(lines) * line_height
+        
+        # Create image with background color
+        if bg_color.lower() == "black":
+            bg_rgb = (0, 0, 0)
+        elif bg_color.lower() == "white":
+            bg_rgb = (255, 255, 255)
+        elif bg_color.lower() == "transparent":
+            bg_rgb = (255, 255, 255, 0)  # RGBA for transparency
+        else:
+            bg_rgb = (0, 0, 0)  # Default to black
+            
+        if bg_color.lower() == "transparent":
+            image = Image.new('RGBA', (img_width, img_height), bg_rgb)
+        else:
+            image = Image.new('RGB', (img_width, img_height), bg_rgb)
+            
+        draw = ImageDraw.Draw(image)
+        
+        # Try to use a monospace font
+        try:
+            font = ImageFont.truetype("consola.ttf", font_size)
+        except:
+            try:
+                font = ImageFont.truetype("cour.ttf", font_size)
+            except:
+                try:
+                    font = ImageFont.truetype("monaco.ttf", font_size)
+                except:
+                    font = ImageFont.load_default()
+        
+        # Set text color
+        if text_color.lower() == "white":
+            text_rgb = (255, 255, 255)
+        elif text_color.lower() == "black":
+            text_rgb = (0, 0, 0)
+        elif text_color.lower() == "green":
+            text_rgb = (0, 255, 0)
+        else:
+            text_rgb = (255, 255, 255)  # Default to white
+            
+        # Draw text
+        y_position = 0
+        for line in lines:
+            draw.text((0, y_position), line, font=font, fill=text_rgb)
+            y_position += line_height
+            
+        return image
+        
+    def export_as_image(self):
+        """Export ASCII art as an image file"""
+        if not self.image_path.get():
+            messagebox.showerror("Error", "Please select an image first.")
+            return
+            
+        # Generate ASCII art
+        ascii_art = self.image_to_ascii(self.image_path.get())
+        if not ascii_art or ascii_art.startswith("Please select"):
+            messagebox.showerror("Error", "Please preview the ASCII art first.")
+            return
+            
+        # Show export options dialog
+        self.show_export_options_dialog(ascii_art)
+        
+    def show_export_options_dialog(self, ascii_art):
+        """Show dialog with export options"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Export Options")
+        dialog.geometry("450x350")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.geometry("+%d+%d" % (self.root.winfo_rootx() + 50, self.root.winfo_rooty() + 50))
+        
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Title
+        title_label = ttk.Label(main_frame, text="Export ASCII Art as Image", 
+                               font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # Font size
+        font_frame = ttk.LabelFrame(main_frame, text="Font Settings", padding="10")
+        font_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(font_frame, text="Font Size:", font=("Arial", 10)).pack(anchor=tk.W)
+        font_size_frame = ttk.Frame(font_frame)
+        font_size_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        font_size_scale = ttk.Scale(font_size_frame, from_=8, to=48, variable=self.export_font_size, orient=tk.HORIZONTAL)
+        font_size_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        font_size_label = ttk.Label(font_size_frame, textvariable=self.export_font_size, font=("Arial", 10, "bold"))
+        font_size_label.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Colors
+        color_frame = ttk.LabelFrame(main_frame, text="Color Settings", padding="10")
+        color_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        # Background color
+        bg_frame = ttk.Frame(color_frame)
+        bg_frame.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(bg_frame, text="Background Color:", font=("Arial", 10)).pack(side=tk.LEFT)
+        bg_combo = ttk.Combobox(bg_frame, textvariable=self.export_bg_color, 
+                               values=["black", "white", "transparent"], state="readonly", width=12)
+        bg_combo.pack(side=tk.RIGHT)
+        
+        # Text color
+        text_frame = ttk.Frame(color_frame)
+        text_frame.pack(fill=tk.X)
+        ttk.Label(text_frame, text="Text Color:", font=("Arial", 10)).pack(side=tk.LEFT)
+        text_combo = ttk.Combobox(text_frame, textvariable=self.export_text_color, 
+                                 values=["white", "black", "green"], state="readonly", width=12)
+        text_combo.pack(side=tk.RIGHT)
+        
+        # Buttons
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(pady=(20, 0))
+        
+        ttk.Button(buttons_frame, text="Export", command=lambda: self.save_image_file(ascii_art, dialog), 
+                  width=12).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(buttons_frame, text="Cancel", command=dialog.destroy, 
+                  width=12).pack(side=tk.LEFT)
+        
+    def save_image_file(self, ascii_art, dialog):
+        """Save ASCII art as image file"""
+        filetypes = [
+            ("PNG files", "*.png"),
+            ("JPEG files", "*.jpg"),
+            ("All files", "*.*")
+        ]
+        
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=filetypes,
+            title="Save ASCII Art as Image"
+        )
+        
+        if filename:
+            try:
+                # Create image from ASCII art
+                image = self.ascii_to_image(ascii_art)
+                if image:
+                    # Save image
+                    image.save(filename)
+                    messagebox.showinfo("Success", f"ASCII art saved as image: {filename}")
+                    dialog.destroy()
+                else:
+                    messagebox.showerror("Error", "Failed to create image from ASCII art.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save image: {str(e)}")
         
     def browse_image(self):
         """Browse for image file"""
@@ -143,11 +342,11 @@ class ImageToASCII:
         """Handle width entry field changes"""
         try:
             value = float(self.width_scale.get())
-            if 0.001 <= value <= 1000:
+            if 0.001 <= value <= 100:
                 # Don't auto-update preview, just validate
                 pass
             else:
-                messagebox.showerror("Invalid Value", "Width scale must be between 0.001 and 1000")
+                messagebox.showerror("Invalid Value", "Width scale must be between 0.001 and 100")
                 self.width_scale.set(100.0)  # Reset to default
         except ValueError:
             messagebox.showerror("Invalid Input", "Please enter a valid number")
@@ -157,11 +356,11 @@ class ImageToASCII:
         """Handle height entry field changes"""
         try:
             value = float(self.height_scale.get())
-            if 0.001 <= value <= 1000:
+            if 0.001 <= value <= 100:
                 # Don't auto-update preview, just validate
                 pass
             else:
-                messagebox.showerror("Invalid Value", "Height scale must be between 0.001 and 1000")
+                messagebox.showerror("Invalid Value", "Height scale must be between 0.001 and 100")
                 self.height_scale.set(100.0)  # Reset to default
         except ValueError:
             messagebox.showerror("Invalid Input", "Please enter a valid number")
@@ -178,33 +377,23 @@ class ImageToASCII:
         self.height_scale.set(height_value)
             
     def image_to_ascii(self, image_path, width_scale=None, height_scale=None, char_set=None, invert=None, brightness=None):
-        """Convert image to ASCII art with support for larger images"""
+        """Convert image to ASCII art"""
         if not os.path.exists(image_path):
             return "Please select a valid image file."
             
         try:
-            # Load image
-            image = Image.open(image_path)
-            
-            # Convert to grayscale
-            image = image.convert('L')
+            # Load image and convert to grayscale
+            image = Image.open(image_path).convert('L')
             
             # Apply brightness adjustment
             if brightness is None:
                 brightness = self.brightness.get()
             
             if brightness != 0:
-                # Convert to numpy array for brightness adjustment
-                import numpy as np
-                img_array = np.array(image)
-                
                 # Apply brightness adjustment
+                img_array = np.array(image)
                 img_array = img_array + brightness
-                
-                # Clamp values to 0-255 range
                 img_array = np.clip(img_array, 0, 255)
-                
-                # Convert back to PIL Image
                 image = Image.fromarray(img_array.astype('uint8'))
             
             # Resize image
@@ -220,7 +409,7 @@ class ImageToASCII:
             # Ensure minimum dimensions of 1x1
             new_width = max(1, new_width)
             new_height = max(1, new_height)
-                
+            
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
             # Get character set
@@ -230,18 +419,16 @@ class ImageToASCII:
                 char_set = self.char_sets.get(char_set, self.char_sets["standard"])
                 
             # Convert to ASCII efficiently
-            ascii_chars = []
             pixels = list(image.getdata())
             
-            # Process in chunks for large images
-            chunk_size = 1000  # Process 1000 pixels at a time
-            
+            # Generate ASCII art
+            ascii_chars = []
             for i in range(0, len(pixels), new_width):
                 row = pixels[i:i + new_width]
                 ascii_row = ""
                 for pixel in row:
-                    # Normalize pixel value to character set index
-                    char_index = int(pixel * (len(char_set) - 1) / 255)
+                    gray_value = pixel
+                    char_index = int(gray_value * (len(char_set) - 1) / 255)
                     
                     # Invert if requested
                     if invert is None:
@@ -257,21 +444,6 @@ class ImageToASCII:
         except Exception as e:
             return f"Error converting image: {str(e)}"
             
-    def convert_image(self):
-        """Convert the selected image to ASCII"""
-        if not self.image_path.get():
-            messagebox.showerror("Error", "Please select an image file first.")
-            return
-            
-        ascii_art = self.image_to_ascii(self.image_path.get())
-        self.ascii_text.set(ascii_art)
-        
-        # Update preview
-        self.preview_text.delete(1.0, tk.END)
-        self.preview_text.insert(1.0, ascii_art)
-        
-        messagebox.showinfo("Success", "Image converted to ASCII art!")
-        
     def open_preview_window(self):
         """Open ASCII art preview in a separate window"""
         if not self.image_path.get():
@@ -306,7 +478,7 @@ class ImageToASCII:
         text_frame.pack(fill=tk.BOTH, expand=True)
         
         preview_text = tk.Text(text_frame, wrap=tk.NONE, font=("Courier", self.font_size.get()), 
-                              bg='black', fg='white')
+                              bg='black', fg='white', insertbackground='white')
         scrollbar_v = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=preview_text.yview)
         scrollbar_h = ttk.Scrollbar(text_frame, orient=tk.HORIZONTAL, command=preview_text.xview)
         
@@ -318,6 +490,7 @@ class ImageToASCII:
         scrollbar_h.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Insert ASCII art
+        self.current_ascii_art = ascii_art
         preview_text.insert(1.0, ascii_art)
         preview_text.config(state=tk.DISABLED)  # Make read-only
         
@@ -337,30 +510,31 @@ class ImageToASCII:
         controls_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Character set control
-        ttk.Label(controls_frame, text="Character Set:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(controls_frame, text="Character Set:", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 8))
         char_combo = ttk.Combobox(controls_frame, textvariable=self.char_set, 
-                                 values=list(self.char_sets.keys()), state="readonly", width=10)
-        char_combo.pack(side=tk.LEFT, padx=(0, 10))
+                                 values=list(self.char_sets.keys()), state="readonly", width=12)
+        char_combo.pack(side=tk.LEFT, padx=(0, 15))
         char_combo.bind('<<ComboboxSelected>>', lambda event: self.update_preview_from_controls(preview_text, status_label))
         
         # Invert colors control
         invert_check = ttk.Checkbutton(controls_frame, text="Invert Colors", variable=self.invert_colors,
                                      command=lambda: self.update_preview_from_controls(preview_text, status_label))
-        invert_check.pack(side=tk.LEFT, padx=(0, 10))
+        invert_check.pack(side=tk.LEFT, padx=(0, 15))
+        
         
         # Brightness control
         brightness_frame = ttk.Frame(controls_frame)
-        brightness_frame.pack(side=tk.LEFT, padx=(0, 10))
+        brightness_frame.pack(side=tk.LEFT, padx=(0, 15))
         
-        ttk.Label(brightness_frame, text="Brightness:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(brightness_frame, text="Brightness:", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 8))
         brightness_slider = ttk.Scale(brightness_frame, from_=-100, to=100, variable=self.brightness, 
-                                     orient=tk.HORIZONTAL, length=100)
-        brightness_slider.pack(side=tk.LEFT, padx=(0, 5))
+                                     orient=tk.HORIZONTAL, length=120)
+        brightness_slider.pack(side=tk.LEFT, padx=(0, 8))
         brightness_slider.bind('<Motion>', lambda event: self.update_preview_from_controls(preview_text, status_label))
         brightness_slider.bind('<ButtonRelease-1>', lambda event: self.update_preview_from_controls(preview_text, status_label))
         
         # Brightness input field
-        brightness_entry = ttk.Entry(brightness_frame, textvariable=self.brightness, width=6)
+        brightness_entry = ttk.Entry(brightness_frame, textvariable=self.brightness, width=8, font=("Arial", 9))
         brightness_entry.pack(side=tk.LEFT, padx=(0, 5))
         brightness_entry.bind('<Return>', lambda event: self.on_brightness_entry_change(preview_text, status_label))
         brightness_entry.bind('<FocusOut>', lambda event: self.on_brightness_entry_change(preview_text, status_label))
@@ -370,11 +544,13 @@ class ImageToASCII:
         action_buttons_frame.pack(side=tk.RIGHT)
         
         ttk.Button(action_buttons_frame, text="Copy to Clipboard", 
-                  command=lambda: self.copy_to_clipboard_dynamic()).pack(side=tk.LEFT, padx=(0, 10))
+                  command=lambda: self.copy_to_clipboard_dynamic(), width=15).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(action_buttons_frame, text="Save ASCII Art", 
-                  command=lambda: self.save_ascii_from_preview_dynamic()).pack(side=tk.LEFT, padx=(0, 10))
+                  command=lambda: self.save_ascii_from_preview_dynamic(), width=15).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(action_buttons_frame, text="Export as Image", 
+                  command=lambda: self.export_as_image_from_preview(), width=15).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(action_buttons_frame, text="Close", 
-                  command=preview_window.destroy).pack(side=tk.LEFT)
+                  command=preview_window.destroy, width=12).pack(side=tk.LEFT)
         
         self.preview_enabled = True
         
@@ -383,6 +559,15 @@ class ImageToASCII:
         self.current_preview_text = preview_text
         self.current_status_label = status_label
         self.current_ascii_art = ascii_art
+        
+    def export_as_image_from_preview(self):
+        """Export ASCII art from preview window as image"""
+        if not hasattr(self, 'current_ascii_art') or not self.current_ascii_art:
+            messagebox.showerror("Error", "No ASCII art available to export.")
+            return
+            
+        # Show export options dialog
+        self.show_export_options_dialog(self.current_ascii_art)
         
     def update_preview_from_controls(self, preview_text, status_label):
         """Update preview when character set or invert colors changes"""
@@ -513,7 +698,7 @@ class ImageToASCII:
     def save_ascii(self):
         """Save ASCII art to file"""
         if not self.ascii_text.get():
-            messagebox.showerror("Error", "No ASCII art to save. Please convert an image first.")
+            messagebox.showerror("Error", "No ASCII art to save. Please preview the ASCII art first.")
             return
             
         filename = filedialog.asksaveasfilename(
