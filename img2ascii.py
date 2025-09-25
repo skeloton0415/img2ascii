@@ -34,6 +34,13 @@ class ImageToASCII:
         self.font_size = tk.IntVar(value=6)  # Font size for preview display
         self.preview_enabled = False  # Control when preview updates
         
+        # Cropping settings
+        self.crop_enabled = tk.BooleanVar(value=False)
+        self.crop_start_x = tk.DoubleVar(value=0.0)  # Percentage (0-100)
+        self.crop_start_y = tk.DoubleVar(value=0.0)  # Percentage (0-100)
+        self.crop_end_x = tk.DoubleVar(value=100.0)  # Percentage (0-100)
+        self.crop_end_y = tk.DoubleVar(value=100.0)  # Percentage (0-100)
+        
         # Image export settings
         self.export_font_size = tk.IntVar(value=12)  # Font size for image export
         self.export_bg_color = tk.StringVar(value="black")  # Background color
@@ -379,7 +386,7 @@ class ImageToASCII:
         self.width_scale.set(width_value)
         self.height_scale.set(height_value)
             
-    def image_to_ascii(self, image_path, width_scale=None, height_scale=None, char_set=None, invert=None, brightness=None):
+    def image_to_ascii(self, image_path, width_scale=None, height_scale=None, char_set=None, invert=None, brightness=None, crop_enabled=None, crop_start_x=None, crop_start_y=None, crop_end_x=None, crop_end_y=None):
         """Convert image to ASCII art"""
         if not os.path.exists(image_path):
             return "Please select a valid image file."
@@ -387,6 +394,35 @@ class ImageToASCII:
         try:
             # Load image and convert to grayscale
             image = Image.open(image_path).convert('L')
+            
+            # Apply cropping if enabled
+            if crop_enabled is None:
+                crop_enabled = self.crop_enabled.get()
+            
+            if crop_enabled:
+                if crop_start_x is None:
+                    crop_start_x = self.crop_start_x.get()
+                if crop_start_y is None:
+                    crop_start_y = self.crop_start_y.get()
+                if crop_end_x is None:
+                    crop_end_x = self.crop_end_x.get()
+                if crop_end_y is None:
+                    crop_end_y = self.crop_end_y.get()
+                
+                # Convert percentages to pixel coordinates
+                start_x = int(image.width * crop_start_x / 100)
+                start_y = int(image.height * crop_start_y / 100)
+                end_x = int(image.width * crop_end_x / 100)
+                end_y = int(image.height * crop_end_y / 100)
+                
+                # Ensure valid crop coordinates
+                start_x = max(0, min(start_x, image.width - 1))
+                start_y = max(0, min(start_y, image.height - 1))
+                end_x = max(start_x + 1, min(end_x, image.width))
+                end_y = max(start_y + 1, min(end_y, image.height))
+                
+                # Crop the image
+                image = image.crop((start_x, start_y, end_x, end_y))
             
             # Apply brightness adjustment
             if brightness is None:
@@ -547,6 +583,62 @@ class ImageToASCII:
         brightness_entry.bind('<Return>', lambda event: self.on_brightness_entry_change(preview_text, status_label))
         brightness_entry.bind('<FocusOut>', lambda event: self.on_brightness_entry_change(preview_text, status_label))
         
+        # Cropping controls - create a separate row for better layout
+        crop_frame = ttk.Frame(main_frame)
+        crop_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        # Cropping enable checkbox
+        crop_enable_frame = ttk.Frame(crop_frame)
+        crop_enable_frame.pack(side=tk.LEFT, padx=(0, 20))
+        
+        crop_check = ttk.Checkbutton(crop_enable_frame, text="Enable Cropping", variable=self.crop_enabled,
+                                   command=lambda: self.update_preview_from_controls(preview_text, status_label))
+        crop_check.pack(side=tk.LEFT)
+        
+        # Crop preset buttons
+        presets_frame = ttk.Frame(crop_frame)
+        presets_frame.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(presets_frame, text="Presets:", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(presets_frame, text="Center", width=6, 
+                  command=lambda: self.set_crop_preset("center")).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(presets_frame, text="Top", width=6, 
+                  command=lambda: self.set_crop_preset("top")).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(presets_frame, text="Bottom", width=6, 
+                  command=lambda: self.set_crop_preset("bottom")).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(presets_frame, text="Left", width=6, 
+                  command=lambda: self.set_crop_preset("left")).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(presets_frame, text="Right", width=6, 
+                  command=lambda: self.set_crop_preset("right")).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(presets_frame, text="Reset", width=6, 
+                  command=lambda: self.set_crop_preset("reset")).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Crop coordinate inputs
+        coords_frame = ttk.Frame(crop_frame)
+        coords_frame.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(coords_frame, text="Crop Area (%):", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Start coordinates
+        start_frame = ttk.Frame(coords_frame)
+        start_frame.pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(start_frame, text="Start:", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Entry(start_frame, textvariable=self.crop_start_x, width=6, font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 2))
+        ttk.Entry(start_frame, textvariable=self.crop_start_y, width=6, font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
+        
+        # End coordinates
+        end_frame = ttk.Frame(coords_frame)
+        end_frame.pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(end_frame, text="End:", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Entry(end_frame, textvariable=self.crop_end_x, width=6, font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 2))
+        ttk.Entry(end_frame, textvariable=self.crop_end_y, width=6, font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
+        
+        # Bind crop coordinate changes
+        for entry in [start_frame.winfo_children()[1], start_frame.winfo_children()[2], 
+                     end_frame.winfo_children()[1], end_frame.winfo_children()[2]]:
+            entry.bind('<Return>', lambda event: self.on_crop_entry_change(preview_text, status_label))
+            entry.bind('<FocusOut>', lambda event: self.on_crop_entry_change(preview_text, status_label))
+        
         # Action buttons frame
         action_buttons_frame = ttk.Frame(buttons_frame)
         action_buttons_frame.pack(side=tk.RIGHT)
@@ -602,7 +694,13 @@ class ImageToASCII:
             char_set_name = self.char_set.get()
             invert_status = "Inverted" if self.invert_colors.get() else "Normal"
             brightness_value = self.brightness.get()
-            status_label.config(text=f"ASCII Art Preview - {char_set_name} ({invert_status}) Brightness: {brightness_value:.0f}")
+            
+            # Add crop information to status
+            crop_info = ""
+            if self.crop_enabled.get():
+                crop_info = f" | Cropped: {self.crop_start_x.get():.0f}%,{self.crop_start_y.get():.0f}% to {self.crop_end_x.get():.0f}%,{self.crop_end_y.get():.0f}%"
+            
+            status_label.config(text=f"ASCII Art Preview - {char_set_name} ({invert_status}) Brightness: {brightness_value:.0f}{crop_info}")
             
         except Exception as e:
             status_label.config(text=f"Error updating: {str(e)}")
@@ -620,6 +718,87 @@ class ImageToASCII:
         except ValueError:
             messagebox.showerror("Invalid Input", "Please enter a valid number")
             self.brightness.set(0.0)  # Reset to default
+    
+    def set_crop_preset(self, preset_type):
+        """Set crop coordinates based on preset type"""
+        if preset_type == "center":
+            # Center crop - crop 25% from each side
+            self.crop_start_x.set(25.0)
+            self.crop_start_y.set(25.0)
+            self.crop_end_x.set(75.0)
+            self.crop_end_y.set(75.0)
+        elif preset_type == "top":
+            # Top half
+            self.crop_start_x.set(0.0)
+            self.crop_start_y.set(0.0)
+            self.crop_end_x.set(100.0)
+            self.crop_end_y.set(50.0)
+        elif preset_type == "bottom":
+            # Bottom half
+            self.crop_start_x.set(0.0)
+            self.crop_start_y.set(50.0)
+            self.crop_end_x.set(100.0)
+            self.crop_end_y.set(100.0)
+        elif preset_type == "left":
+            # Left half
+            self.crop_start_x.set(0.0)
+            self.crop_start_y.set(0.0)
+            self.crop_end_x.set(50.0)
+            self.crop_end_y.set(100.0)
+        elif preset_type == "right":
+            # Right half
+            self.crop_start_x.set(50.0)
+            self.crop_start_y.set(0.0)
+            self.crop_end_x.set(100.0)
+            self.crop_end_y.set(100.0)
+        elif preset_type == "reset":
+            # Reset to full image
+            self.crop_start_x.set(0.0)
+            self.crop_start_y.set(0.0)
+            self.crop_end_x.set(100.0)
+            self.crop_end_y.set(100.0)
+        
+        # Update preview if cropping is enabled
+        if self.crop_enabled.get():
+            if hasattr(self, 'current_preview_text') and hasattr(self, 'current_status_label'):
+                self.update_preview_from_controls(self.current_preview_text, self.current_status_label)
+    
+    def on_crop_entry_change(self, preview_text, status_label):
+        """Handle crop coordinate entry field changes"""
+        try:
+            # Validate all crop coordinates
+            start_x = float(self.crop_start_x.get())
+            start_y = float(self.crop_start_y.get())
+            end_x = float(self.crop_end_x.get())
+            end_y = float(self.crop_end_y.get())
+            
+            # Validate ranges
+            if not (0 <= start_x <= 100 and 0 <= start_y <= 100 and 
+                    0 <= end_x <= 100 and 0 <= end_y <= 100):
+                messagebox.showerror("Invalid Value", "Crop coordinates must be between 0 and 100")
+                self.reset_crop_to_default()
+                return
+            
+            # Validate that end coordinates are greater than start coordinates
+            if start_x >= end_x or start_y >= end_y:
+                messagebox.showerror("Invalid Value", "End coordinates must be greater than start coordinates")
+                self.reset_crop_to_default()
+                return
+            
+            # Valid values, update preview if cropping is enabled
+            if self.crop_enabled.get():
+                self.update_preview_from_controls(preview_text, status_label)
+                
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter valid numbers for crop coordinates")
+            self.reset_crop_to_default()
+    
+    def reset_crop_to_default(self):
+        """Reset crop coordinates to default values"""
+        self.crop_start_x.set(0.0)
+        self.crop_start_y.set(0.0)
+        self.crop_end_x.set(100.0)
+        self.crop_end_y.set(100.0)
         
     def scale_with_mouse(self, event, preview_text, status_label):
         """Change font size using mouse wheel with Ctrl key - maintains aspect ratio"""
@@ -650,7 +829,13 @@ class ImageToASCII:
         char_set_name = self.char_set.get()
         invert_status = "Inverted" if self.invert_colors.get() else "Normal"
         brightness_value = self.brightness.get()
-        status_label.config(text=f"ASCII Art Preview - {char_set_name} ({invert_status}) Brightness: {brightness_value:.0f} Font: {new_font_size}")
+        
+        # Add crop information to status
+        crop_info = ""
+        if self.crop_enabled.get():
+            crop_info = f" | Cropped: {self.crop_start_x.get():.0f}%,{self.crop_start_y.get():.0f}% to {self.crop_end_x.get():.0f}%,{self.crop_end_y.get():.0f}%"
+        
+        status_label.config(text=f"ASCII Art Preview - {char_set_name} ({invert_status}) Brightness: {brightness_value:.0f} Font: {new_font_size}{crop_info}")
         
     def copy_to_clipboard_dynamic(self):
         """Copy current ASCII art to clipboard"""
