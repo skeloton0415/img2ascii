@@ -26,7 +26,6 @@ class ImageToASCII:
         
         # Variables
         self.image_path = tk.StringVar()
-        self.ascii_text = tk.StringVar()
         self.width_scale = tk.DoubleVar(value=100.0)
         self.height_scale = tk.DoubleVar(value=100.0)
         self.char_set = tk.StringVar(value="standard")
@@ -195,14 +194,18 @@ class ImageToASCII:
         # Try to use a monospace font
         try:
             font = ImageFont.truetype("consola.ttf", font_size)
-        except:
+        except (OSError, IOError):
             try:
                 font = ImageFont.truetype("cour.ttf", font_size)
-            except:
+            except (OSError, IOError):
                 try:
                     font = ImageFont.truetype("monaco.ttf", font_size)
-                except:
-                    font = ImageFont.load_default()
+                except (OSError, IOError):
+                    try:
+                        # Try common system fonts
+                        font = ImageFont.truetype("DejaVuSansMono.ttf", font_size)
+                    except (OSError, IOError):
+                        font = ImageFont.load_default()
         
         # Set text color
         if text_color.lower() == "white":
@@ -368,9 +371,9 @@ class ImageToASCII:
             
     def set_aspect_ratio(self, width_value, height_value):
         """Set width and height scales to specific numeric values"""
-        # Clamp to valid range
-        width_value = max(0.001, min(1000, width_value))
-        height_value = max(0.001, min(1000, height_value))
+        # Clamp to valid range (consistent with input validation)
+        width_value = max(0.001, min(100, width_value))
+        height_value = max(0.001, min(100, height_value))
         
         # Update scale variables directly
         self.width_scale.set(width_value)
@@ -410,7 +413,12 @@ class ImageToASCII:
             new_width = max(1, new_width)
             new_height = max(1, new_height)
             
-            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            # Use LANCZOS resampling with backward compatibility
+            try:
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            except AttributeError:
+                # Fallback for older Pillow versions
+                image = image.resize((new_width, new_height), Image.LANCZOS)
             
             # Get character set
             if char_set is None:
@@ -695,26 +703,6 @@ class ImageToASCII:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save file: {str(e)}")
         
-    def save_ascii(self):
-        """Save ASCII art to file"""
-        if not self.ascii_text.get():
-            messagebox.showerror("Error", "No ASCII art to save. Please preview the ASCII art first.")
-            return
-            
-        filename = filedialog.asksaveasfilename(
-            title="Save ASCII Art",
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(self.ascii_text.get())
-                messagebox.showinfo("Success", f"ASCII art saved to {filename}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save file: {str(e)}")
-
 def main():
     """Main function"""
     root = tk.Tk()
