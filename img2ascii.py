@@ -40,6 +40,7 @@ class ImageToASCII:
         self.crop_start_y = tk.DoubleVar(value=0.0)  # Percentage (0-100)
         self.crop_end_x = tk.DoubleVar(value=100.0)  # Percentage (0-100)
         self.crop_end_y = tk.DoubleVar(value=100.0)  # Percentage (0-100)
+        self.drag_crop_mode = False  # Whether drag-to-crop mode is active
         
         # Image export settings
         self.export_font_size = tk.IntVar(value=12)  # Font size for image export
@@ -415,14 +416,19 @@ class ImageToASCII:
                 end_x = int(image.width * crop_end_x / 100)
                 end_y = int(image.height * crop_end_y / 100)
                 
-                # Ensure valid crop coordinates
-                start_x = max(0, min(start_x, image.width - 1))
-                start_y = max(0, min(start_y, image.height - 1))
-                end_x = max(start_x + 1, min(end_x, image.width))
-                end_y = max(start_y + 1, min(end_y, image.height))
-                
-                # Crop the image
-                image = image.crop((start_x, start_y, end_x, end_y))
+                # Validate crop coordinates before applying
+                if start_x >= end_x or start_y >= end_y:
+                    # Invalid crop coordinates, skip cropping
+                    pass
+                else:
+                    # Ensure valid crop coordinates
+                    start_x = max(0, min(start_x, image.width - 1))
+                    start_y = max(0, min(start_y, image.height - 1))
+                    end_x = max(start_x + 1, min(end_x, image.width))
+                    end_y = max(start_y + 1, min(end_y, image.height))
+                    
+                    # Crop the image
+                    image = image.crop((start_x, start_y, end_x, end_y))
             
             # Apply brightness adjustment
             if brightness is None:
@@ -515,28 +521,54 @@ class ImageToASCII:
         ascii_art = self.image_to_ascii(self.image_path.get())
         
         # Update status
-        status_label.config(text="ASCII Art Preview - Hold Ctrl + Scroll to change font size")
+        status_label.config(text="ASCII Art Preview - Hold Ctrl + Scroll to change font size | Click 'Drag' button to enable drag-to-crop")
         
-        # Create text widget for preview
+        # Create text widget for preview with drag-to-crop capability
         text_frame = ttk.Frame(main_frame)
         text_frame.pack(fill=tk.BOTH, expand=True)
         
+        # Create text widget first
         preview_text = tk.Text(text_frame, wrap=tk.NONE, font=("Courier", self.font_size.get()), 
-                              bg='black', fg='white', insertbackground='white')
+                              bg='black', fg='white', insertbackground='white', highlightthickness=0)
         scrollbar_v = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=preview_text.yview)
         scrollbar_h = ttk.Scrollbar(text_frame, orient=tk.HORIZONTAL, command=preview_text.xview)
         
         preview_text.configure(yscrollcommand=scrollbar_v.set,
                               xscrollcommand=scrollbar_h.set)
         
+        # Pack text widget and scrollbars
         preview_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar_v.pack(side=tk.RIGHT, fill=tk.Y)
         scrollbar_h.pack(side=tk.BOTTOM, fill=tk.X)
         
+        # Initialize drag-to-crop variables
+        self.drag_start_x = None
+        self.drag_start_y = None
+        self.drag_end_x = None
+        self.drag_end_y = None
+        self.crop_rectangle = None
+        self.is_dragging = False
+        
+        # Store reference to preview text for drag-to-crop
+        self.preview_text_widget = preview_text
+        
+        # Bind drag-to-crop events directly to text widget
+        preview_text.bind("<Button-1>", lambda event: self.start_drag_crop(event, preview_text, status_label))
+        preview_text.bind("<B1-Motion>", lambda event: self.update_drag_crop(event, preview_text, status_label))
+        preview_text.bind("<ButtonRelease-1>", lambda event: self.end_drag_crop(event, preview_text, status_label))
+        
         # Insert ASCII art
         self.current_ascii_art = ascii_art
+        
+        # Ensure text widget is in normal state before inserting
+        preview_text.config(state=tk.NORMAL)
+        preview_text.delete(1.0, tk.END)  # Clear any existing content
         preview_text.insert(1.0, ascii_art)
         preview_text.config(state=tk.DISABLED)  # Make read-only
+        
+        # Force the text widget to update and display content
+        preview_text.update_idletasks()
+        preview_text.see(1.0)  # Scroll to top
         
         # Bind mouse wheel events for scaling
         preview_text.bind("<Control-MouseWheel>", lambda event: self.scale_with_mouse(event, preview_text, status_label))
@@ -611,7 +643,9 @@ class ImageToASCII:
         ttk.Button(presets_frame, text="Right", width=6, 
                   command=lambda: self.set_crop_preset("right")).pack(side=tk.LEFT, padx=(0, 3))
         ttk.Button(presets_frame, text="Reset", width=6, 
-                  command=lambda: self.set_crop_preset("reset")).pack(side=tk.LEFT, padx=(0, 10))
+                  command=lambda: self.set_crop_preset("reset")).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(presets_frame, text="Drag", width=6, 
+                  command=lambda: self.toggle_drag_crop_mode()).pack(side=tk.LEFT, padx=(0, 10))
         
         # Crop coordinate inputs
         coords_frame = ttk.Frame(crop_frame)
@@ -799,6 +833,164 @@ class ImageToASCII:
         self.crop_start_y.set(0.0)
         self.crop_end_x.set(100.0)
         self.crop_end_y.set(100.0)
+    
+    def toggle_drag_crop_mode(self):
+        """Toggle drag-to-crop mode on/off"""
+        self.drag_crop_mode = not self.drag_crop_mode
+        
+        if self.drag_crop_mode:
+            # Enable cropping and show instructions
+            self.crop_enabled.set(True)
+            if hasattr(self, 'current_status_label'):
+                self.current_status_label.config(text="Drag-to-Crop Mode: Click and drag on the ASCII preview to select crop area")
+            # Change cursor to indicate drag mode
+            if hasattr(self, 'preview_text_widget'):
+                self.preview_text_widget.config(cursor="crosshair")
+        else:
+            # Disable drag mode
+            if hasattr(self, 'current_status_label'):
+                self.update_preview_from_controls(self.current_preview_text, self.current_status_label)
+            # Reset cursor
+            if hasattr(self, 'preview_text_widget'):
+                self.preview_text_widget.config(cursor="")
+    
+    def start_drag_crop(self, event, preview_text, status_label):
+        """Start drag-to-crop selection"""
+        if not self.drag_crop_mode or not self.crop_enabled.get():
+            return
+        
+        # Get text widget coordinates
+        self.drag_start_x = event.x
+        self.drag_start_y = event.y
+        self.is_dragging = True
+        
+        # Update status to show start of crop selection
+        if hasattr(self, 'current_status_label'):
+            self.current_status_label.config(text=f"Start crop selection at: ({self.drag_start_x}, {self.drag_start_y}) - Drag to select area")
+        
+        # Clear any existing selection
+        preview_text.tag_remove("crop_selection", 1.0, tk.END)
+    
+    def update_drag_crop(self, event, preview_text, status_label):
+        """Update drag-to-crop selection while dragging"""
+        if not self.drag_crop_mode or not self.crop_enabled.get() or not self.is_dragging:
+            return
+        
+        # Get current coordinates
+        self.drag_end_x = event.x
+        self.drag_end_y = event.y
+        
+        # Update status to show crop coordinates
+        if hasattr(self, 'current_status_label'):
+            self.current_status_label.config(text=f"Dragging crop selection: ({self.drag_start_x}, {self.drag_start_y}) to ({self.drag_end_x}, {self.drag_end_y})")
+        
+        # Convert coordinates to text positions for visual feedback
+        try:
+            start_index = preview_text.index(f"@{self.drag_start_x},{self.drag_start_y}")
+            end_index = preview_text.index(f"@{self.drag_end_x},{self.drag_end_y}")
+            
+            # Clear previous selection
+            preview_text.tag_remove("crop_selection", 1.0, tk.END)
+            
+            # Create selection tag with crop-specific highlighting
+            preview_text.tag_configure("crop_selection", 
+                                     background="red", 
+                                     foreground="white",
+                                     relief="raised",
+                                     borderwidth=2)
+            
+            # Apply selection
+            preview_text.tag_add("crop_selection", start_index, end_index)
+        except:
+            # If text position conversion fails, skip visual feedback
+            pass
+    
+    def end_drag_crop(self, event, preview_text, status_label):
+        """End drag-to-crop selection and apply crop"""
+        if not self.drag_crop_mode or not self.crop_enabled.get() or not self.is_dragging:
+            return
+        
+        self.is_dragging = False
+        
+        # Get final coordinates
+        self.drag_end_x = event.x
+        self.drag_end_y = event.y
+        
+        # Calculate crop area as percentage of ASCII art
+        if hasattr(self, 'current_ascii_art') and self.current_ascii_art:
+            # Get ASCII art dimensions
+            ascii_lines = self.current_ascii_art.split('\n')
+            ascii_width = max(len(line) for line in ascii_lines) if ascii_lines else 1
+            ascii_height = len(ascii_lines)
+            
+            # Convert drag coordinates to text positions first
+            try:
+                start_text_pos = preview_text.index(f"@{self.drag_start_x},{self.drag_start_y}")
+                end_text_pos = preview_text.index(f"@{self.drag_end_x},{self.drag_end_y}")
+                
+                # Parse text positions to get line and column
+                start_line, start_col = map(int, start_text_pos.split('.'))
+                end_line, end_col = map(int, end_text_pos.split('.'))
+                
+                # Convert to ASCII character positions (0-based)
+                start_char_x = max(0, min(ascii_width - 1, start_col - 1))
+                start_char_y = max(0, min(ascii_height - 1, start_line - 1))
+                end_char_x = max(start_char_x + 1, min(ascii_width, end_col - 1))
+                end_char_y = max(start_char_y + 1, min(ascii_height, end_line - 1))
+                
+                # Convert to percentages
+                start_x_percent = (start_char_x / ascii_width) * 100
+                start_y_percent = (start_char_y / ascii_height) * 100
+                end_x_percent = (end_char_x / ascii_width) * 100
+                end_y_percent = (end_char_y / ascii_height) * 100
+                
+                # Update crop coordinates
+                self.crop_start_x.set(start_x_percent)
+                self.crop_start_y.set(start_y_percent)
+                self.crop_end_x.set(end_x_percent)
+                self.crop_end_y.set(end_y_percent)
+                
+                # Update preview
+                self.update_preview_from_controls(preview_text, status_label)
+                
+                # Exit drag mode
+                self.drag_crop_mode = False
+                preview_text.config(cursor="")
+                
+                # Clear selection
+                preview_text.tag_remove("crop_selection", 1.0, tk.END)
+                
+            except Exception as e:
+                # Fallback to simple coordinate conversion if text position conversion fails
+                print(f"Drag-to-crop coordinate conversion error: {e}")
+                # Use the original method as fallback
+                text_width = preview_text.winfo_width()
+                text_height = preview_text.winfo_height()
+                
+                if text_width > 0 and text_height > 0:
+                    char_width = text_width / ascii_width
+                    char_height = text_height / ascii_height
+                    
+                    start_char_x = max(0, min(ascii_width - 1, int(self.drag_start_x / char_width)))
+                    start_char_y = max(0, min(ascii_height - 1, int(self.drag_start_y / char_height)))
+                    end_char_x = max(start_char_x + 1, min(ascii_width, int(self.drag_end_x / char_width)))
+                    end_char_y = max(start_char_y + 1, min(ascii_height, int(self.drag_end_y / char_height)))
+                    
+                    start_x_percent = (start_char_x / ascii_width) * 100
+                    start_y_percent = (start_char_y / ascii_height) * 100
+                    end_x_percent = (end_char_x / ascii_width) * 100
+                    end_y_percent = (end_char_y / ascii_height) * 100
+                    
+                    self.crop_start_x.set(start_x_percent)
+                    self.crop_start_y.set(start_y_percent)
+                    self.crop_end_x.set(end_x_percent)
+                    self.crop_end_y.set(end_y_percent)
+                    
+                    self.update_preview_from_controls(preview_text, status_label)
+                    self.drag_crop_mode = False
+                    preview_text.config(cursor="")
+                    
+                    preview_text.tag_remove("crop_selection", 1.0, tk.END)
         
     def scale_with_mouse(self, event, preview_text, status_label):
         """Change font size using mouse wheel with Ctrl key - maintains aspect ratio"""
